@@ -1,0 +1,31 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="card">
+  <h2>Upload medicine package image</h2>
+  <form action="{{ url_for('upload') }}" method="post" enctype="multipart/form-data" class="upload-form">
+    <input type="file" name="image" accept="image/*" required />
+    <button type="submit">Scan & Find</button>
+  </form>
+  <p class="hint">Tip: Focus on the brand/medicine name on the package for best results.</p>
+  {% if not config.DEBUG and false %}
+  {% endif %}
+  <details class="help">
+    <summary>Having trouble?</summary>
+    <ul>
+      <li>Make sure Tesseract OCR is installed and in PATH on Windows.</li>
+      <li>Try a clear, well-lit, non-blurry photo.</li>
+      <li>Crop to the area with the medicine name if possible.</li>
+    </ul>
+  </details>
+</section>
+
+<section class="card" style="margin-top: 16px;">
+  <h2>Or search by medicine name</h2>
+  <form action="{{ url_for('search') }}" method="get" class="upload-form">
+    <input type="text" name="q" placeholder="Enter medicine name" required />
+    <button type="submit">Search</button>
+  </form>
+</section>
+{% endblock %}
+
+

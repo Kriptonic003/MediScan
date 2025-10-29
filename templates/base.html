@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>mediscan – Medicine OCR Lookup</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='mediscan-icon-alt.svg') }}">
+</head>
+<body>
+    <header class="app-header">
+        <h1>
+            <a href="{{ url_for('index') }}" class="brand">
+                <img src="{{ url_for('static', filename='mediscan-logo-alt.svg') }}" alt="mediscan" height="56" />
+            </a>
+        </h1>
+    </header>
+    <main class="container">
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}
+                <ul class="flash">
+                    {% for message in messages %}
+                        <li>{{ message }}</li>
+                    {% endfor %}
+                </ul>
+            {% endif %}
+        {% endwith %}
+        {% block content %}{% endblock %}
+    </main>
+    <footer class="app-footer">Built with Flask + Tesseract OCR</footer>
+</body>
+</html>
+
+

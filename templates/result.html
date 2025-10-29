@@ -1,0 +1,65 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="grid">
+  <div class="card">
+    <h2>Scanned Image</h2>
+    {% if image_path %}
+    <img src="/{{ image_path }}" alt="Uploaded image" class="preview" />
+    {% endif %}
+    <h3>Extracted Text</h3>
+    <pre class="extracted">{{ query_text or '—' }}</pre>
+  </div>
+
+  <div class="card">
+    <h2>Best Match</h2>
+    {% if heading_text %}
+    <p class="muted" style="margin-top: -6px;">
+      Detected heading: <strong>{{ heading_text }}</strong>
+    </p>
+    {% endif %}
+    {% if heading_match_score is not none %}
+      {% if heading_matches %}
+      <div class="notice success">Confidence: {{ '%.0f'|format(heading_match_score) }}% (heading matches)</div>
+      {% else %}
+      <div class="notice warning">Warning: Heading may not match the medicine name. Results might be inaccurate.</div>
+      {% endif %}
+    {% elif image_path %}
+      <div class="notice warning">Warning: Couldn't detect a clear heading. Results might be inaccurate.</div>
+    {% endif %}
+    {% if match %}
+    <div class="details">
+      <p><strong>Medicine Name:</strong> {{ match.medicine_name }}</p>
+      <p><strong>Composition:</strong> {{ match.composition }}</p>
+      <p><strong>Uses:</strong> {{ match.uses }}</p>
+      <p><strong>Side effects:</strong> {{ match.side_effects }}</p>
+      <p><strong>Manufacturer:</strong> {{ match.manufacturer }}</p>
+      <div class="reviews">
+        <div>Excellent: {{ match.excellent_review_pct or 'NA' }}%</div>
+        <div>Average: {{ match.average_review_pct or 'NA' }}%</div>
+        <div>Poor: {{ match.poor_review_pct or 'NA' }}%</div>
+      </div>
+      {% if match.image_url %}
+      <p><a href="{{ match.image_url }}" target="_blank" rel="noopener">View Product Image</a></p>
+      {% endif %}
+    </div>
+    {% else %}
+    <p>No confident match found. Try another photo or clearer text.</p>
+    {% endif %}
+
+    <h3>Top Candidates</h3>
+    {% if candidates %}
+      <ul class="candidates">
+        {% for name, score in candidates %}
+          <li>{{ name }} <span class="muted">(score {{ '%.0f'|format(score) }})</span></li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted">None</p>
+    {% endif %}
+  </div>
+</section>
+
+<p><a class="back" href="{{ url_for('index') }}">← Scan another</a></p>
+{% endblock %}
+
+
