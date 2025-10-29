@@ -184,6 +184,8 @@ def create_app() -> Flask:
             identified_via=None,
         )
 
+    
+
     @app.route("/signup", methods=["GET", "POST"]) 
     def signup():
         if request.method == "POST":

@@ -711,6 +711,8 @@ button[disabled] { opacity: 0.6; cursor: not-allowed; }
   }
 }
 
+ 
+
 /* Responsive navigation */
 @media (max-width: 768px) {
   .header-content {
