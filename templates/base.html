@@ -9,11 +9,27 @@
 </head>
 <body>
     <header class="app-header">
-        <h1>
-            <a href="{{ url_for('index') }}" class="brand">
-                <img src="{{ url_for('static', filename='mediscan-logo-alt.svg') }}" alt="mediscan" height="56" />
-            </a>
-        </h1>
+        <div class="header-content">
+            <div class="brand-section">
+                <a href="{{ url_for('home') }}" class="brand">
+                    <img src="{{ url_for('static', filename='mediscan-logo-alt.svg') }}" alt="mediscan" height="48" />
+                </a>
+            </div>
+            <nav class="main-nav">
+                <a href="{{ url_for('home') }}" class="nav-link">Home</a>
+                <a href="{{ url_for('index') }}" class="nav-link nav-primary">Scan Medicine</a>
+                <div class="nav-divider"></div>
+                {% if session.get('user_email') %}
+                    <div class="user-menu">
+                        <span class="user-name">{{ session.get('user_email') }}</span>
+                        <a href="{{ url_for('logout') }}" class="nav-link nav-secondary">Logout</a>
+                    </div>
+                {% else %}
+                    <a href="{{ url_for('login') }}" class="nav-link nav-secondary">Login</a>
+                    <a href="{{ url_for('signup') }}" class="nav-link nav-accent">Sign Up</a>
+                {% endif %}
+            </nav>
+        </div>
     </header>
     <main class="container">
         {% with messages = get_flashed_messages() %}
@@ -28,6 +44,30 @@
         {% block content %}{% endblock %}
     </main>
     <footer class="app-footer">Built with Flask + Tesseract OCR</footer>
+    <div id="loadingOverlay" class="loading-overlay" aria-hidden="true">
+        <div class="loading-box">
+            <div class="spinner"></div>
+            <div class="loading-text">Processing…</div>
+        </div>
+    </div>
+    <script>
+        (function(){
+            const overlay = document.getElementById('loadingOverlay');
+            function show(){ overlay.classList.add('active'); }
+            function wire(form){
+                if(!form) return;
+                form.addEventListener('submit', function(){
+                    // defer to allow HTML5 validation to run
+                    setTimeout(()=>{ show(); }, 0);
+                });
+            }
+            document.addEventListener('DOMContentLoaded', function(){
+                // Auto-wire forms with class 'upload-form' and 'show-loading'
+                document.querySelectorAll('form.upload-form').forEach(wire);
+                document.querySelectorAll('form.show-loading').forEach(wire);
+            });
+        })();
+    </script>
 </body>
 </html>
 

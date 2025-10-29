@@ -3,7 +3,7 @@ import sqlite3
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict
 
-from flask import Flask, render_template, request, redirect, url_for, send_from_directory, flash
+from flask import Flask, render_template, request, redirect, url_for, send_from_directory, flash, session
 import base64
 from io import BytesIO
 from werkzeug.utils import secure_filename
@@ -40,6 +40,11 @@ def create_app() -> Flask:
 
     _ensure_dirs()
     _configure_tesseract_on_windows()
+    _ensure_users_table()
+
+    @app.route("/home")
+    def home():
+        return render_template("home.html")
 
     @app.route("/")
     def index():
@@ -179,11 +184,74 @@ def create_app() -> Flask:
             identified_via=None,
         )
 
+    @app.route("/signup", methods=["GET", "POST"]) 
+    def signup():
+        if request.method == "POST":
+            email = request.form.get("email", "").strip().lower()
+            password = request.form.get("password", "")
+            if not email or not password:
+                flash("Email and password are required.")
+                return redirect(url_for("signup"))
+            try:
+                conn = sqlite3.connect(DB_PATH)
+                cur = conn.cursor()
+                cur.execute("INSERT INTO users (email, password_hash) VALUES (?, ?)", (email, _hash_password(password)))
+                conn.commit()
+                conn.close()
+            except sqlite3.IntegrityError:
+                flash("Email already registered. Please log in.")
+                return redirect(url_for("login"))
+            flash("Signup successful. You can now log in.")
+            return redirect(url_for("login"))
+        return render_template("signup.html")
+
+    @app.route("/login", methods=["GET", "POST"]) 
+    def login():
+        if request.method == "POST":
+            email = request.form.get("email", "").strip().lower()
+            password = request.form.get("password", "")
+            conn = sqlite3.connect(DB_PATH)
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM users WHERE email = ?", (email,))
+            row = cur.fetchone()
+            conn.close()
+            if row and _check_password(password, row["password_hash"]):
+                session["user_email"] = email
+                flash("Logged in.")
+                return redirect(url_for("index"))
+            flash("Invalid credentials.")
+            return redirect(url_for("login"))
+        return render_template("login.html")
+
+    @app.route("/logout") 
+    def logout():
+        session.pop("user_email", None)
+        flash("Logged out.")
+        return redirect(url_for("home"))
+
     return app
 
 
 def _ensure_dirs() -> None:
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _ensure_users_table() -> None:
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        """
+    )
+    conn.commit()
+    conn.close()
 
 
 def _allowed_file(filename: str) -> bool:
@@ -577,6 +645,25 @@ def _compute_match_score(a: str, b: str) -> float:
         return 0.0
     overlap = len(a_tokens & b_tokens)
     return 100.0 * overlap / max(1, len(b_tokens))
+
+
+def _hash_password(password: str) -> str:
+    try:
+        from werkzeug.security import generate_password_hash
+        return generate_password_hash(password)
+    except Exception:
+        # Fallback: very basic (not recommended), but avoid hard failure
+        import hashlib
+        return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+
+def _check_password(password: str, password_hash: str) -> bool:
+    try:
+        from werkzeug.security import check_password_hash
+        return check_password_hash(password_hash, password)
+    except Exception:
+        import hashlib
+        return hashlib.sha256(password.encode("utf-8")).hexdigest() == password_hash
 
 
 if __name__ == "__main__":

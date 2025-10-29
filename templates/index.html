@@ -2,11 +2,35 @@
 {% block content %}
 <section class="card">
   <h2>Upload medicine package image</h2>
-  <form id="uploadForm" action="{{ url_for('upload') }}" method="post" enctype="multipart/form-data" class="upload-form">
-    <input id="fileInput" type="file" name="image" accept="image/*" required />
+  
+  <!-- Toggle between file upload and camera -->
+  <div class="upload-mode-toggle">
+    <button type="button" class="mode-btn active" data-mode="file" id="fileModeBtn">📁 Upload File</button>
+    <button type="button" class="mode-btn" data-mode="camera" id="cameraModeBtn">📷 Use Camera</button>
+  </div>
+
+  <!-- File upload mode -->
+  <form id="uploadForm" action="{{ url_for('upload') }}" method="post" enctype="multipart/form-data" class="upload-form" data-mode="file">
+    <input id="fileInput" type="file" name="image" accept="image/*" />
     <input id="croppedInput" type="hidden" name="cropped_image" value="" />
     <button id="scanBtn" type="submit">Scan & Find</button>
   </form>
+
+  <!-- Camera mode -->
+  <div id="cameraMode" class="camera-container" style="display:none;">
+    <video id="cameraVideo" autoplay playsinline style="display:none;"></video>
+    <canvas id="cameraCanvas" style="display:none;"></canvas>
+    <div class="camera-controls">
+      <button type="button" id="startCameraBtn" class="btn-primary">Start Camera</button>
+      <button type="button" id="captureBtn" class="btn-primary" style="display:none;">📸 Capture Photo</button>
+      <button type="button" id="retakeBtn" class="btn-secondary" style="display:none;">Retake</button>
+      <button type="button" id="stopCameraBtn" class="btn-secondary" style="display:none;">Stop Camera</button>
+    </div>
+    <div id="cameraPreview" style="display:none; margin-top:16px; text-align:center;">
+      <img id="capturedImg" style="max-width:100%; border-radius:10px; border:2px solid rgba(34,211,238,.3);" alt="Captured" />
+      <button type="button" id="useCapturedBtn" class="btn-primary" style="margin-top:12px;">Use This Photo</button>
+    </div>
+  </div>
   <div id="cropArea" style="margin-top:12px; display:none;">
     <div class="muted" style="margin-bottom:6px;">Drag to select the brand name area, then click Scan.</div>
     <div style="position:relative; max-width:100%;">
@@ -49,9 +73,183 @@
     const resetBtn = document.getElementById('resetCrop');
     const clearBtn = document.getElementById('clearCrop');
 
+    // Camera elements
+    const fileModeBtn = document.getElementById('fileModeBtn');
+    const cameraModeBtn = document.getElementById('cameraModeBtn');
+    const uploadFormEl = document.getElementById('uploadForm');
+    const cameraMode = document.getElementById('cameraMode');
+    const cameraVideo = document.getElementById('cameraVideo');
+    const cameraCanvas = document.getElementById('cameraCanvas');
+    const startCameraBtn = document.getElementById('startCameraBtn');
+    const captureBtn = document.getElementById('captureBtn');
+    const retakeBtn = document.getElementById('retakeBtn');
+    const stopCameraBtn = document.getElementById('stopCameraBtn');
+    const cameraPreview = document.getElementById('cameraPreview');
+    const capturedImg = document.getElementById('capturedImg');
+    const useCapturedBtn = document.getElementById('useCapturedBtn');
+
     let imgNaturalWidth = 0, imgNaturalHeight = 0;
     let startX = 0, startY = 0, endX = 0, endY = 0;
     let dragging = false;
+    let stream = null;
+
+    // Mode switching
+    fileModeBtn.addEventListener('click', () => switchMode('file'));
+    cameraModeBtn.addEventListener('click', () => switchMode('camera'));
+
+    function switchMode(mode) {
+      if(mode === 'file') {
+        fileModeBtn.classList.add('active');
+        cameraModeBtn.classList.remove('active');
+        uploadFormEl.style.display = 'flex';
+        cameraMode.style.display = 'none';
+        fileInput.required = true;
+        stopCamera();
+        const errorDiv = document.getElementById('cameraError');
+        if(errorDiv) errorDiv.style.display = 'none';
+      } else {
+        fileModeBtn.classList.remove('active');
+        cameraModeBtn.classList.add('active');
+        uploadFormEl.style.display = 'none';
+        cameraMode.style.display = 'block';
+        fileInput.required = false;
+        
+        // Check if camera is supported before showing camera mode
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          showCameraError('Camera not supported in this browser. Please use file upload.');
+        }
+      }
+    }
+
+    // Camera functionality
+    startCameraBtn.addEventListener('click', startCamera);
+    stopCameraBtn.addEventListener('click', stopCamera);
+    captureBtn.addEventListener('click', capturePhoto);
+    retakeBtn.addEventListener('click', retakePhoto);
+    useCapturedBtn.addEventListener('click', useCapturedPhoto);
+
+    async function startCamera() {
+      // Check if getUserMedia is available
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        showCameraError('Camera API not supported in this browser. Please use file upload instead.');
+        return;
+      }
+
+      // Check HTTPS/localhost requirement
+      const isSecure = location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+      if (!isSecure) {
+        showCameraError('Camera access requires HTTPS. Please use file upload or access via https:// or localhost.');
+        return;
+      }
+
+      try {
+        // Try back camera first (for mobile), fallback to any camera
+        let constraints = {
+          video: { 
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          }
+        };
+        
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        cameraVideo.srcObject = stream;
+        cameraVideo.style.display = 'block';
+        startCameraBtn.style.display = 'none';
+        captureBtn.style.display = 'inline-block';
+        stopCameraBtn.style.display = 'inline-block';
+        cameraPreview.style.display = 'none';
+        document.getElementById('cameraError').style.display = 'none';
+      } catch(err) {
+        console.error('Camera error:', err);
+        let errorMsg = 'Camera access denied or not available.';
+        
+        if (err.name === 'NotAllowedError') {
+          errorMsg = 'Camera permission denied. Please allow camera access in your browser settings and try again.';
+        } else if (err.name === 'NotFoundError') {
+          errorMsg = 'No camera found on this device. Please use file upload instead.';
+        } else if (err.name === 'NotReadableError') {
+          errorMsg = 'Camera is being used by another application. Please close other apps and try again.';
+        }
+        
+        showCameraError(errorMsg);
+      }
+    }
+
+    function showCameraError(message) {
+      let errorDiv = document.getElementById('cameraError');
+      if (!errorDiv) {
+        errorDiv = document.createElement('div');
+        errorDiv.id = 'cameraError';
+        errorDiv.className = 'notice warning';
+        errorDiv.style.marginTop = '12px';
+        cameraMode.appendChild(errorDiv);
+      }
+      errorDiv.textContent = message;
+      errorDiv.style.display = 'block';
+      
+      // Show fallback option
+      setTimeout(() => {
+        errorDiv.innerHTML = message + '<br><a href="#" class="back" onclick="document.getElementById(\'fileModeBtn\').click(); return false;" style="margin-top:8px; display:inline-block;">Switch to File Upload</a>';
+      }, 100);
+    }
+
+    function stopCamera() {
+      if(stream) {
+        stream.getTracks().forEach(track => track.stop());
+        stream = null;
+      }
+      cameraVideo.srcObject = null;
+      cameraVideo.style.display = 'none';
+      startCameraBtn.style.display = 'inline-block';
+      captureBtn.style.display = 'none';
+      stopCameraBtn.style.display = 'none';
+      cameraPreview.style.display = 'none';
+    }
+
+    function capturePhoto() {
+      const ctx = cameraCanvas.getContext('2d');
+      cameraCanvas.width = cameraVideo.videoWidth;
+      cameraCanvas.height = cameraVideo.videoHeight;
+      ctx.drawImage(cameraVideo, 0, 0);
+      
+      const dataUrl = cameraCanvas.toDataURL('image/jpeg', 0.9);
+      capturedImg.src = dataUrl;
+      cameraPreview.style.display = 'block';
+      cameraVideo.style.display = 'none';
+      captureBtn.style.display = 'none';
+      retakeBtn.style.display = 'inline-block';
+    }
+
+    function retakePhoto() {
+      cameraPreview.style.display = 'none';
+      cameraVideo.style.display = 'block';
+      captureBtn.style.display = 'inline-block';
+      retakeBtn.style.display = 'none';
+    }
+
+    function useCapturedPhoto() {
+      // Convert captured image to File and set in fileInput
+      cameraCanvas.toBlob((blob) => {
+        const file = new File([blob], 'camera-capture.jpg', { type: 'image/jpeg' });
+        const dataTransfer = new DataTransfer();
+        dataTransfer.items.add(file);
+        fileInput.files = dataTransfer.files;
+        
+        // Show it in preview for cropping
+        const url = URL.createObjectURL(blob);
+        previewImg.onload = () => {
+          imgNaturalWidth = previewImg.naturalWidth;
+          imgNaturalHeight = previewImg.naturalHeight;
+          cropArea.style.display = 'block';
+          fitCanvasToImage();
+        };
+        previewImg.src = url;
+        
+        // Switch back to file mode and stop camera
+        switchMode('file');
+      }, 'image/jpeg', 0.9);
+    }
 
     function drawOverlay(){
       const ctx = cropCanvas.getContext('2d');

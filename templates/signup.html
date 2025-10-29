@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="card">
+  <h2>Create account</h2>
+  <form action="{{ url_for('signup') }}" method="post" class="auth-form show-loading">
+    <input type="email" name="email" placeholder="Email" required class="auth-input" />
+    <input type="password" name="password" placeholder="Password" required class="auth-input" />
+    <button type="submit" class="auth-submit">Sign up</button>
+  </form>
+  <p class="hint" style="margin-top: 16px;">Optional account to enable saved history in the future.</p>
+  <p><a class="back" href="{{ url_for('login') }}">Already have an account? Log in</a></p>
+</section>
+{% endblock %}
+
+
+
