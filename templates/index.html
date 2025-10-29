@@ -2,10 +2,22 @@
 {% block content %}
 <section class="card">
   <h2>Upload medicine package image</h2>
-  <form action="{{ url_for('upload') }}" method="post" enctype="multipart/form-data" class="upload-form">
-    <input type="file" name="image" accept="image/*" required />
-    <button type="submit">Scan & Find</button>
+  <form id="uploadForm" action="{{ url_for('upload') }}" method="post" enctype="multipart/form-data" class="upload-form">
+    <input id="fileInput" type="file" name="image" accept="image/*" required />
+    <input id="croppedInput" type="hidden" name="cropped_image" value="" />
+    <button id="scanBtn" type="submit">Scan & Find</button>
   </form>
+  <div id="cropArea" style="margin-top:12px; display:none;">
+    <div class="muted" style="margin-bottom:6px;">Drag to select the brand name area, then click Scan.</div>
+    <div style="position:relative; max-width:100%;">
+      <img id="previewImg" style="max-width:100%; display:block;" alt="Preview" />
+      <canvas id="cropCanvas" style="position:absolute; left:0; top:0; cursor:crosshair;"></canvas>
+    </div>
+    <div style="display:flex; gap:8px; margin-top:8px;">
+      <button id="resetCrop" type="button">Reset selection</button>
+      <button id="clearCrop" type="button">Use full image</button>
+    </div>
+  </div>
   <p class="hint">Tip: Focus on the brand/medicine name on the package for best results.</p>
   {% if not config.DEBUG and false %}
   {% endif %}
@@ -26,6 +38,125 @@
     <button type="submit">Search</button>
   </form>
 </section>
+<script>
+  (function(){
+    const fileInput = document.getElementById('fileInput');
+    const previewImg = document.getElementById('previewImg');
+    const cropCanvas = document.getElementById('cropCanvas');
+    const cropArea = document.getElementById('cropArea');
+    const uploadForm = document.getElementById('uploadForm');
+    const croppedInput = document.getElementById('croppedInput');
+    const resetBtn = document.getElementById('resetCrop');
+    const clearBtn = document.getElementById('clearCrop');
+
+    let imgNaturalWidth = 0, imgNaturalHeight = 0;
+    let startX = 0, startY = 0, endX = 0, endY = 0;
+    let dragging = false;
+
+    function drawOverlay(){
+      const ctx = cropCanvas.getContext('2d');
+      ctx.clearRect(0,0,cropCanvas.width,cropCanvas.height);
+      // dim background
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      ctx.fillRect(0,0,cropCanvas.width,cropCanvas.height);
+      // selection rect
+      const x = Math.min(startX,endX);
+      const y = Math.min(startY,endY);
+      const w = Math.abs(endX-startX);
+      const h = Math.abs(endY-startY);
+      if(w>2 && h>2){
+        ctx.clearRect(x,y,w,h);
+        ctx.strokeStyle = '#22d3ee';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x,y,w,h);
+      }
+    }
+
+    function fitCanvasToImage(){
+      cropCanvas.width = previewImg.clientWidth;
+      cropCanvas.height = previewImg.clientHeight;
+      drawOverlay();
+    }
+
+    fileInput.addEventListener('change', () => {
+      const file = fileInput.files && fileInput.files[0];
+      if(!file){ return; }
+      const url = URL.createObjectURL(file);
+      previewImg.onload = () => {
+        imgNaturalWidth = previewImg.naturalWidth;
+        imgNaturalHeight = previewImg.naturalHeight;
+        cropArea.style.display = 'block';
+        fitCanvasToImage();
+      };
+      previewImg.src = url;
+    });
+
+    window.addEventListener('resize', fitCanvasToImage);
+
+    function canvasPos(e){
+      const rect = cropCanvas.getBoundingClientRect();
+      const x = (e.clientX - rect.left);
+      const y = (e.clientY - rect.top);
+      return {x,y};
+    }
+
+    cropCanvas.addEventListener('mousedown', (e)=>{
+      dragging = true;
+      const p = canvasPos(e);
+      startX = endX = p.x; startY = endY = p.y;
+      drawOverlay();
+    });
+    cropCanvas.addEventListener('mousemove', (e)=>{
+      if(!dragging) return;
+      const p = canvasPos(e);
+      endX = p.x; endY = p.y;
+      drawOverlay();
+    });
+    cropCanvas.addEventListener('mouseup', ()=>{ dragging = false; });
+    cropCanvas.addEventListener('mouseleave', ()=>{ dragging = false; });
+
+    resetBtn.addEventListener('click', ()=>{
+      startX = startY = endX = endY = 0;
+      drawOverlay();
+      croppedInput.value = '';
+    });
+    clearBtn.addEventListener('click', ()=>{
+      startX = 0; startY = 0; endX = cropCanvas.width; endY = cropCanvas.height;
+      drawOverlay();
+    });
+
+    uploadForm.addEventListener('submit', (e)=>{
+      // If a selection exists, create cropped data URL
+      const sx = Math.min(startX,endX);
+      const sy = Math.min(startY,endY);
+      const sw = Math.abs(endX-startX);
+      const sh = Math.abs(endY-startY);
+      if(sw > 5 && sh > 5 && imgNaturalWidth && imgNaturalHeight){
+        // Map canvas selection to natural image pixels
+        const scaleX = imgNaturalWidth / cropCanvas.width;
+        const scaleY = imgNaturalHeight / cropCanvas.height;
+        const srcX = Math.max(0, Math.floor(sx * scaleX));
+        const srcY = Math.max(0, Math.floor(sy * scaleY));
+        const srcW = Math.min(imgNaturalWidth - srcX, Math.floor(sw * scaleX));
+        const srcH = Math.min(imgNaturalHeight - srcY, Math.floor(sh * scaleY));
+
+        const out = document.createElement('canvas');
+        out.width = srcW; out.height = srcH;
+        const ctx = out.getContext('2d');
+        ctx.drawImage(previewImg, srcX, srcY, srcW, srcH, 0, 0, srcW, srcH);
+        try{
+          const dataUrl = out.toDataURL('image/png');
+          croppedInput.value = dataUrl;
+        }catch(err){
+          console.warn('Failed to create crop data URL', err);
+        }
+      } else {
+        // no selection -> ensure field is blank
+        croppedInput.value = '';
+      }
+    });
+  })();
+</script>
 {% endblock %}
 
 

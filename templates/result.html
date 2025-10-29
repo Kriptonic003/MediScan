@@ -12,6 +12,14 @@
 
   <div class="card">
     <h2>Best Match</h2>
+    {% if barcode_text %}
+    <p class="muted" style="margin-top: -6px;">
+      Detected barcode: <strong>{{ barcode_text }}</strong>
+    </p>
+    {% endif %}
+    {% if identified_via == 'barcode' %}
+      <div class="notice success">Identified via barcode</div>
+    {% endif %}
     {% if heading_text %}
     <p class="muted" style="margin-top: -6px;">
       Detected heading: <strong>{{ heading_text }}</strong>

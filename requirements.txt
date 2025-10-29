@@ -4,4 +4,5 @@ Pillow==10.4.0
 pytesseract==0.3.13
 rapidfuzz==3.9.7
 opencv-python==4.10.0.84
+pyzbar==0.1.9
 

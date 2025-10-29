@@ -4,6 +4,8 @@ from pathlib import Path
 from typing import Optional, Tuple, List, Dict
 
 from flask import Flask, render_template, request, redirect, url_for, send_from_directory, flash
+import base64
+from io import BytesIO
 from werkzeug.utils import secure_filename
 
 from PIL import Image, ImageFilter, ImageOps
@@ -14,6 +16,13 @@ try:
     RAPIDFUZZ_AVAILABLE = True
 except Exception:
     RAPIDFUZZ_AVAILABLE = False
+
+# Optional: barcode decoding
+try:
+    from pyzbar.pyzbar import decode as pyzbar_decode  # type: ignore
+    PYZBAR_AVAILABLE = True
+except Exception:
+    PYZBAR_AVAILABLE = False
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -53,7 +62,49 @@ def create_app() -> Flask:
 
         filename = secure_filename(file.filename)
         saved_path = UPLOAD_DIR / filename
-        file.save(saved_path)
+
+        # If a client-side crop was provided as data URL, prefer it
+        cropped_data_url = request.form.get("cropped_image", "").strip()
+        if cropped_data_url.startswith("data:image") and "," in cropped_data_url:
+            try:
+                header, b64data = cropped_data_url.split(",", 1)
+                img_bytes = base64.b64decode(b64data)
+                img = Image.open(BytesIO(img_bytes))
+                # Normalize to RGB to avoid saving issues
+                if img.mode not in ("RGB", "L"):
+                    img = img.convert("RGB")
+                crop_name = f"crop_{filename.rsplit('.',1)[0]}.png"
+                saved_path = UPLOAD_DIR / crop_name
+                img.save(saved_path, format="PNG")
+                filename = saved_path.name
+            except Exception:
+                # fallback to original file
+                file.save(saved_path)
+        else:
+            file.save(saved_path)
+
+        # Try barcode first
+        barcode_text: Optional[str] = _try_decode_barcodes(saved_path)
+        if barcode_text:
+            identified_via = "barcode"
+            match, candidates = _find_best_match(barcode_text)
+            heading_match_score: Optional[float] = None
+            heading_matches: bool = False
+            if match:
+                heading_match_score = _compute_match_score(barcode_text, match["medicine_name"])  # 0..100
+                heading_matches = heading_match_score >= 75.0
+            return render_template(
+                "result.html",
+                query_text=barcode_text,
+                match=match,
+                candidates=candidates,
+                image_path=f"uploads/{filename}",
+                heading_text=barcode_text,
+                heading_match_score=heading_match_score,
+                heading_matches=heading_matches,
+                barcode_text=barcode_text,
+                identified_via=identified_via,
+            )
 
         try:
             extracted_text = _extract_text_from_image(saved_path)
@@ -72,6 +123,8 @@ def create_app() -> Flask:
                 heading_text=heading_text,
                 heading_match_score=None,
                 heading_matches=False,
+                barcode_text=None,
+                identified_via=None,
             )
 
         match, candidates = _find_best_match(extracted_text)
@@ -91,6 +144,8 @@ def create_app() -> Flask:
             heading_text=heading_text,
             heading_match_score=heading_match_score,
             heading_matches=heading_matches,
+            barcode_text=None,
+            identified_via=None,
         )
 
     @app.route("/uploads/<path:filename>")
@@ -120,6 +175,8 @@ def create_app() -> Flask:
             heading_text=first_line or None,
             heading_match_score=heading_match_score,
             heading_matches=heading_matches,
+            barcode_text=None,
+            identified_via=None,
         )
 
     return app
@@ -354,6 +411,93 @@ def _extract_heading_from_image(image_path: Path) -> Optional[str]:
         return heading or None
     except Exception:
         return None
+
+
+def _try_decode_barcodes(image_path: Path) -> Optional[str]:
+    """
+    Return decoded barcode/QR text if found, otherwise None.
+    Tries pyzbar first; falls back to OpenCV QRCodeDetector if available.
+    """
+    # Prepare variants: rotations, grayscale, contrast/binarization, scales
+    try:
+        base_img = Image.open(image_path)
+    except Exception:
+        return None
+
+    if base_img.mode not in ("RGB", "L"):
+        base_img = base_img.convert("RGB")
+
+    variants: List[Image.Image] = []
+
+    def gen_variants(img: Image.Image) -> List[Image.Image]:
+        out: List[Image.Image] = []
+        gray = ImageOps.grayscale(img)
+        out.append(img)
+        out.append(gray)
+        # Contrast/binarize variants
+        try:
+            from PIL import ImageFilter as _IF
+            sharp = gray.filter(_IF.UnsharpMask(radius=2, percent=150, threshold=3))
+            out.append(sharp)
+            bw1 = gray.point(lambda p: 255 if p > 160 else 0)
+            out.append(bw1)
+            bw2 = gray.point(lambda p: 255 if p > 120 else 0)
+            out.append(bw2)
+        except Exception:
+            pass
+        return out
+
+    # Rotations and scales
+    rotations = [0, 90, 180, 270]
+    scales = [1.0, 1.5, 2.0, 0.75]
+
+    for rot in rotations:
+        rotated = base_img.rotate(rot, expand=True)
+        for scale in scales:
+            w = max(1, int(rotated.width * scale))
+            h = max(1, int(rotated.height * scale))
+            resized = rotated.resize((w, h), Image.BICUBIC)
+            variants.extend(gen_variants(resized))
+
+    # Try pyzbar across variants (broad symbology support)
+    if PYZBAR_AVAILABLE:
+        for v in variants:
+            try:
+                results = pyzbar_decode(v)
+                for r in results:
+                    data = (r.data or b"").decode("utf-8", errors="ignore").strip()
+                    if data:
+                        return data
+            except Exception:
+                continue
+
+    # Fallbacks: OpenCV QR (single and multi)
+    try:
+        import cv2  # type: ignore
+        import numpy as np  # type: ignore
+        qr = cv2.QRCodeDetector()
+        for v in variants:
+            np_img = np.array(v.convert("RGB"))[:, :, ::-1]
+            try:
+                data, _pts, _ = qr.detectAndDecode(np_img)
+                data = (data or "").strip()
+                if data:
+                    return data
+            except Exception:
+                pass
+            try:
+                retval, decoded_info, _points, _ = qr.detectAndDecodeMulti(np_img)
+                if retval and decoded_info:
+                    for d in decoded_info:
+                        d = (d or "").strip()
+                        if d:
+                            return d
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    return None
 
 
 def _fetch_all_medicine_names() -> List[Tuple[int, str]]:
